@@ -194,6 +194,10 @@
             color: #666;
             margin: 3px 0;
         }
+        .note-actions {
+            display: flex;
+            gap: 10px;
+        }
         .success-msg {
             background: #f0f0f0;
             color: #000;
@@ -269,7 +273,7 @@
 
             <!-- Tab 2: Publish Research Note -->
             <div class="tab-content" id="tab1">
-                <h2>Publish Research Note</h2>
+                <h2 id="publishTabHeader">Publish Research Note</h2>
                 <div id="publishMessage"></div>
 
                 <div class="form-group">
@@ -316,7 +320,8 @@
                     <textarea id="noteReference" placeholder="Full citation/reference"></textarea>
                 </div>
 
-                <button onclick="publishNote()">Publish Note</button>
+                <button id="publishBtn" onclick="publishNote()">Publish Note</button>
+                <button id="cancelEditBtn" onclick="cancelEdit()" class="secondary" style="display: none; margin-left: 10px;">Cancel Edit</button>
             </div>
 
             <!-- Tab 3: View All Notes -->
@@ -330,7 +335,7 @@
     <script type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-        import { getDatabase, ref, set, push, remove, onValue, get } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
+        import { getDatabase, ref, set, push, remove, onValue, get, update } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
 
         const firebaseConfig = {
             apiKey: "AIzaSyDhy20YwDQexnH0_qDt7ulbC5aqcnjPPAo",
@@ -349,6 +354,7 @@
 
         window.db = db;
         window.auth = auth;
+        let editingNoteId = null;
 
         // Check auth state
         onAuthStateChanged(auth, (user) => {
@@ -469,11 +475,14 @@
                 }
 
                 const select = document.getElementById('categorySelect');
+                const currentValue = select.value;
                 select.innerHTML = '<option value="">-- Select Existing Category --</option>';
                 
                 Array.from(categories).sort().forEach(cat => {
                     select.innerHTML += `<option value="${cat}">${cat}</option>`;
                 });
+                
+                if (currentValue) select.value = currentValue;
             });
         };
 
@@ -490,7 +499,64 @@
             }
         };
 
-        // Publish Note
+        // Edit Note
+        window.editNote = async function(noteId) {
+            const noteRef = ref(db, `notes/${noteId}`);
+            const snapshot = await get(noteRef);
+            
+            if (snapshot.exists()) {
+                const note = snapshot.val();
+                editingNoteId = noteId;
+
+                const select = document.getElementById('categorySelect');
+                let categoryExists = Array.from(select.options).some(opt => opt.value === note.category);
+
+                if (categoryExists) {
+                    select.value = note.category;
+                    document.getElementById('newCategory').value = '';
+                    document.getElementById('newCategory').disabled = true;
+                } else {
+                    select.value = '';
+                    document.getElementById('newCategory').value = note.category;
+                    document.getElementById('newCategory').disabled = false;
+                }
+
+                document.getElementById('noteTitle').value = note.title;
+                document.getElementById('noteAuthors').value = note.authors;
+                document.getElementById('noteJournal').value = note.journal;
+                document.getElementById('noteYear').value = note.year;
+                document.getElementById('noteContent').value = note.content;
+                document.getElementById('noteReference').value = note.reference;
+
+                document.getElementById('publishTabHeader').textContent = 'Edit Research Note';
+                document.getElementById('publishBtn').textContent = 'Update Note';
+                document.getElementById('cancelEditBtn').style.display = 'inline-block';
+                document.getElementById('publishMessage').innerHTML = '';
+                
+                switchTab(1);
+            }
+        };
+
+        // Cancel Edit
+        window.cancelEdit = function() {
+            editingNoteId = null;
+            document.getElementById('publishTabHeader').textContent = 'Publish Research Note';
+            document.getElementById('publishBtn').textContent = 'Publish Note';
+            document.getElementById('cancelEditBtn').style.display = 'none';
+            
+            document.getElementById('categorySelect').value = '';
+            document.getElementById('newCategory').value = '';
+            document.getElementById('newCategory').disabled = false;
+            document.getElementById('noteTitle').value = '';
+            document.getElementById('noteAuthors').value = '';
+            document.getElementById('noteJournal').value = '';
+            document.getElementById('noteYear').value = '';
+            document.getElementById('noteContent').value = '';
+            document.getElementById('noteReference').value = '';
+            document.getElementById('publishMessage').innerHTML = '';
+        };
+
+        // Publish or Update Note
         window.publishNote = async function() {
             const selectedCategory = document.getElementById('categorySelect').value;
             const newCategory = document.getElementById('newCategory').value.trim();
@@ -511,33 +577,37 @@
             }
 
             try {
-                const notesRef = ref(db, 'notes');
-                const newNote = {
-                    category,
-                    title,
-                    authors,
-                    journal,
-                    year,
-                    content,
-                    reference,
-                    timestamp: Date.now(),
-                    datePublished: new Date().toISOString().split('T')[0]
-                };
+                if (editingNoteId) {
+                    const noteRef = ref(db, `notes/${editingNoteId}`);
+                    await update(noteRef, {
+                        category,
+                        title,
+                        authors,
+                        journal,
+                        year,
+                        content,
+                        reference
+                    });
+                    messageDiv.innerHTML = '<div class="success-msg">Research note updated successfully!</div>';
+                    window.cancelEdit();
+                } else {
+                    const notesRef = ref(db, 'notes');
+                    const newNote = {
+                        category,
+                        title,
+                        authors,
+                        journal,
+                        year,
+                        content,
+                        reference,
+                        timestamp: Date.now(),
+                        datePublished: new Date().toISOString().split('T')[0]
+                    };
 
-                await push(notesRef, newNote);
-                messageDiv.innerHTML = '<div class="success-msg">Research note published successfully!</div>';
-                
-                // Clear form
-                document.getElementById('categorySelect').value = '';
-                document.getElementById('newCategory').value = '';
-                document.getElementById('newCategory').disabled = false;
-                document.getElementById('noteTitle').value = '';
-                document.getElementById('noteAuthors').value = '';
-                document.getElementById('noteJournal').value = '';
-                document.getElementById('noteYear').value = '';
-                document.getElementById('noteContent').value = '';
-                document.getElementById('noteReference').value = '';
-                
+                    await push(notesRef, newNote);
+                    messageDiv.innerHTML = '<div class="success-msg">Research note published successfully!</div>';
+                    window.cancelEdit();
+                }
                 loadCategories();
             } catch (error) {
                 messageDiv.innerHTML = `<div class="error-msg">Error: ${error.message}</div>`;
@@ -569,7 +639,10 @@
                                     <p><strong>Journal:</strong> ${note.journal} (${note.year})</p>
                                     <p><strong>Published:</strong> ${note.datePublished}</p>
                                 </div>
-                                <button class="danger" onclick="deleteNote('${note.id}')">Delete</button>
+                                <div class="note-actions">
+                                    <button class="secondary" onclick="editNote('${note.id}')">Edit</button>
+                                    <button class="danger" onclick="deleteNote('${note.id}')">Delete</button>
+                                </div>
                             </div>
                         `;
                     });
